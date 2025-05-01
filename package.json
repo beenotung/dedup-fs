@@ -1,5 +1,5 @@
 {
-  "name": "litefs",
+  "name": "dedup-fs",
   "version": "0.0.0",
   "type": "commonjs",
   "description": "",
