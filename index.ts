@@ -86,7 +86,25 @@ fuse.mount(function (err: any) {
   })
 })
 
+// handle ctrl+c signal
 process.on('SIGINT', () => {
+  console.log('SIGINT (ctrl+c) signal received')
+  unmount()
+})
+
+// handle kill signal (from nodemon)
+process.on('SIGUSR1', () => {
+  console.log('SIGUSR1 signal received')
+  unmount()
+})
+process.on('SIGUSR2', () => {
+  console.log('SIGUSR2 signal received')
+  unmount()
+})
+
+// TODO handle restart from ts-node-dev
+
+function unmount() {
   console.log('unmounting')
   fuse.unmount()
-})
+}
