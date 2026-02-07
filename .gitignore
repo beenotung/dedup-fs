@@ -9,3 +9,10 @@ dist/
 *.tgz
 .DS_Store
 log.txt
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+dump.sql
+*.xz

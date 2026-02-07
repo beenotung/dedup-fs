@@ -15,13 +15,29 @@
     "test": "tsc --noEmit",
     "clean": "rimraf dist",
     "build": "rimraf dist && tsc -p . && rimraf dist/tsconfig.tsbuildinfo",
-    "tsc": "tsc -p ."
+    "tsc": "tsc -p .",
+    "db:ui": "erd-ui erd.txt",
+    "db:setup": "npm run db:migrate",
+    "db:dev": "run-s db:migrate db:plan db:update",
+    "db:migrate": "knex migrate:latest",
+    "db:plan": "auto-migrate db.sqlite3 < erd.txt",
+    "db:rename": "auto-migrate --rename db.sqlite3 < erd.txt",
+    "db:update": "run-s db:migrate db:gen-proxy",
+    "db:gen-proxy": "erd-to-proxy < erd.txt > src/proxy.ts"
   },
   "dependencies": {
-    "fuse-native": "^2.2.6"
+    "better-sqlite3": "^12.6.2",
+    "better-sqlite3-proxy": "^2.10.1",
+    "better-sqlite3-schema": "^3.1.7",
+    "fuse-native": "^2.2.6",
+    "knex": "^3.1.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/integer": "^4.0.3",
     "@types/node": "^24.10.11",
+    "npm-run-all": "^4.1.5",
+    "quick-erd": "^4.32.0",
     "rimraf": "^6.1.2",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
@@ -29,7 +45,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "fuse-native"
+      "fuse-native",
+      "better-sqlite3"
     ]
   }
 }
