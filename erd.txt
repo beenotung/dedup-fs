@@ -27,6 +27,7 @@ dir
 ---
 id integer PK
 name text
+parent_id integer NULL FK >0- parent.id
 
 
 file
@@ -56,6 +57,6 @@ name text unique
 # table-bg: #ffffff
 # table-text: #000000
 # block (710, 182)
-# dir (106, 139)
+# dir (29, 123)
 # file (369, 149)
-# mimetype (104, 304)
+# mimetype (107, 309)

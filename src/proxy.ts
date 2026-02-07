@@ -11,6 +11,8 @@ export type Block = {
 export type Dir = {
   id?: null | number
   name: string
+  parent_id: null | number
+  parent?: Parent
 }
 
 export type Mimetype = {
@@ -42,7 +44,10 @@ export let proxy = proxySchema<DBProxy>({
   db,
   tableFields: {
     block: [],
-    dir: [],
+    dir: [
+      /* foreign references */
+      ['parent', { field: 'parent_id', table: 'parent' }],
+    ],
     mimetype: [],
     file: [
       /* foreign references */
