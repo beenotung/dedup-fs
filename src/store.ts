@@ -1,8 +1,10 @@
-import { find } from 'better-sqlite3-proxy'
-import { File, proxy } from './proxy'
+import { filter, find, pick } from 'better-sqlite3-proxy'
+import { Dir, File, proxy } from './proxy'
 import { hashChunk } from './hash'
+import { db } from './db'
+import { basename, dirname } from 'path'
 
-let block_size = 256
+export let block_size = 256
 
 /** @returns id of the block */
 function saveBlock(chunk: Buffer): number {
@@ -22,6 +24,9 @@ export function saveDir(path: string): number {
   if (!path.startsWith('/')) {
     throw new Error('path must start with /')
   }
+  if (path === '/') {
+    return getRootDir()
+  }
   let parts = path.split('/')
   let parent_id = getRootDir()
   for (let i = 1; i < parts.length; i++) {
@@ -29,6 +34,48 @@ export function saveDir(path: string): number {
     parent_id = saveDirPart(parent_id, name)
   }
   return parent_id
+}
+
+export function getDir(path: string): Dir | null {
+  if (!path.startsWith('/')) {
+    throw new Error('path must start with /')
+  }
+  if (path === '/') {
+    return proxy.dir[getRootDir()]
+  }
+  let parts = path.split('/')
+  let parent_id: number | null = getRootDir()
+  for (let i = 1; i < parts.length; i++) {
+    let name = parts[i]
+    parent_id = findDir(parent_id, name)
+    if (!parent_id) return null
+  }
+  return proxy.dir[parent_id]
+}
+
+export function getFile(path: string): File | null {
+  let dir_name = dirname(path)
+  let file_name = basename(path)
+
+  let dir = getDir(dir_name)
+  if (!dir) return null
+
+  let file = find(proxy.file, { dir_id: dir.id!, name: file_name })
+  if (!file) return null
+
+  return file
+}
+
+let select_filename_by_dir = db
+  .prepare<{ dir_id: number }, string>(
+    /* sql */ `
+select name from file where dir_id = :dir_id
+`,
+  )
+  .pluck()
+
+export function readDir(dir: Dir): string[] {
+  return select_filename_by_dir.all({ dir_id: dir.id! }) as string[]
 }
 
 let getRootDir = (): number => {
@@ -51,6 +98,23 @@ let getRootDir = (): number => {
 
 // parent_id -> name -> id
 let cache_dir: Array<Map<string, number>> = []
+
+function findDir(parent_id: number, name: string): number | null {
+  let dirs = cache_dir[parent_id]
+  if (!dirs) {
+    dirs = new Map<string, number>()
+    cache_dir[parent_id] = dirs
+  }
+
+  let id = dirs.get(name)
+  if (!id) {
+    let row = find(proxy.dir, { parent_id, name })
+    if (!row) return null
+    id = row.id!
+  }
+  dirs.set(name, id)
+  return id
+}
 
 function saveDirPart(parent_id: number, name: string): number {
   let dirs = cache_dir[parent_id]
