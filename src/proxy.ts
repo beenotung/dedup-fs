@@ -8,14 +8,33 @@ export type Block = {
   chunk: Buffer
 }
 
-export type File = {
+export type Dir = {
   id?: null | number
   name: string
+}
+
+export type Mimetype = {
+  id?: null | number
+  name: string
+}
+
+export type File = {
+  id?: null | number
+  dir_id: number
+  dir?: Dir
+  name: string
+  size: number
+  ctime: number
+  mtime: number
+  mimetype_id: number
+  mimetype?: Mimetype
   parts: string // json
 }
 
 export type DBProxy = {
   block: Block[]
+  dir: Dir[]
+  mimetype: Mimetype[]
   file: File[]
 }
 
@@ -23,6 +42,12 @@ export let proxy = proxySchema<DBProxy>({
   db,
   tableFields: {
     block: [],
-    file: [],
+    dir: [],
+    mimetype: [],
+    file: [
+      /* foreign references */
+      ['dir', { field: 'dir_id', table: 'dir' }],
+      ['mimetype', { field: 'mimetype_id', table: 'mimetype' }],
+    ],
   },
 })

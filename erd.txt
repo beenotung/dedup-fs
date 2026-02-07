@@ -23,11 +23,28 @@ count integer
 chunk blob
 
 
+dir
+---
+id integer PK
+name text
+
+
 file
 ----
 id integer PK
+dir_id integer FK >0- dir.id
 name text
+size integer
+ctime integer
+mtime integer
+mimetype_id integer FK >0- mimetype.id
 parts json
+
+
+mimetype
+--------
+id integer PK
+name text unique
 
 
 # zoom: 1.000
@@ -38,5 +55,7 @@ parts json
 # diagram-text: #000000
 # table-bg: #ffffff
 # table-text: #000000
-# block (378, 132)
-# file (125, 136)
+# block (710, 182)
+# dir (106, 139)
+# file (369, 149)
+# mimetype (104, 304)
