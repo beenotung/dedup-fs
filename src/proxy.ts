@@ -14,7 +14,7 @@ export type Dir = {
   birth_time: number
   modify_time: number
   parent_id: null | number
-  parent?: Parent
+  parent?: Dir
 }
 
 export type Mimetype = {
@@ -48,7 +48,7 @@ export let proxy = proxySchema<DBProxy>({
     block: [],
     dir: [
       /* foreign references */
-      ['parent', { field: 'parent_id', table: 'parent' }],
+      ['parent', { field: 'parent_id', table: 'dir' }],
     ],
     mimetype: [],
     file: [
