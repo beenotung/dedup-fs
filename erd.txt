@@ -27,6 +27,8 @@ dir
 ---
 id integer PK
 name text
+ctime integer
+mtime integer
 parent_id integer NULL FK >0- parent.id
 
 

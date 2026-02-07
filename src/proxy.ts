@@ -11,6 +11,8 @@ export type Block = {
 export type Dir = {
   id?: null | number
   name: string
+  ctime: number
+  mtime: number
   parent_id: null | number
   parent?: Parent
 }
