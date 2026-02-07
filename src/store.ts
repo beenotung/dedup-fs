@@ -207,6 +207,7 @@ export function saveMimetype(name: string): number {
 }
 
 export function getFileContent(file: File): Buffer {
+  if (file.size === 0) return Buffer.alloc(0)
   let parts: Array<string | number> = file.parts.split(',')
   let content = Buffer.alloc(file.size)
   let offset = 0
