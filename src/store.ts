@@ -38,7 +38,12 @@ let getRootDir = (): number => {
     id = row.id!
   } else {
     let now = Date.now()
-    id = proxy.dir.push({ name: '/', parent_id: null, ctime: now, mtime: now })
+    id = proxy.dir.push({
+      name: '/',
+      parent_id: null,
+      birth_time: now,
+      modify_time: now,
+    })
   }
   getRootDir = () => id
   return id
@@ -65,8 +70,8 @@ function saveDirPart(parent_id: number, name: string): number {
     id = row.id!
   } else {
     let now = Date.now()
-    id = proxy.dir.push({ name, parent_id, ctime: now, mtime: now })
-    proxy.dir[parent_id].mtime = now
+    id = proxy.dir.push({ name, parent_id, birth_time: now, modify_time: now })
+    proxy.dir[parent_id].modify_time = now
   }
   dirs.set(name, id)
   return id
@@ -91,12 +96,12 @@ export function saveFile(args: {
     dir_id: args.dir_id,
     name: args.name,
     size: content.byteLength,
-    ctime: now,
-    mtime: now,
+    birth_time: now,
+    modify_time: now,
     mimetype_id: args.mimetype_id,
     parts: parts.join(','),
   })
-  proxy.dir[args.dir_id].mtime = now
+  proxy.dir[args.dir_id].modify_time = now
   return id
 }
 
@@ -115,7 +120,7 @@ export function updateFile(args: { file: File; content: Buffer }) {
     parts.push(id)
   }
   file.size = content.byteLength
-  file.mtime = now
+  file.modify_time = now
   file.parts = parts.join(',')
 }
 

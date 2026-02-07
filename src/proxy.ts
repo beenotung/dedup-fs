@@ -11,8 +11,8 @@ export type Block = {
 export type Dir = {
   id?: null | number
   name: string
-  ctime: number
-  mtime: number
+  birth_time: number
+  modify_time: number
   parent_id: null | number
   parent?: Parent
 }
@@ -28,8 +28,8 @@ export type File = {
   dir?: Dir
   name: string
   size: number
-  ctime: number
-  mtime: number
+  birth_time: number
+  modify_time: number
   mimetype_id: number
   mimetype?: Mimetype
   parts: string // json
