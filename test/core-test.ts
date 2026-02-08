@@ -1,4 +1,4 @@
-import { mount, readdir } from '../src/fs'
+import { mount } from '../src/fs'
 
 async function main() {
   const result = await mount('./mnt', {

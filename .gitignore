@@ -16,3 +16,4 @@ log.txt
 *.sqlite3-wal
 dump.sql
 *.xz
+mnt

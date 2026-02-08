@@ -1,6 +1,21 @@
 import * as fs from 'fs'
-import { block_size, getDir, getFile, getFileContent, readDir } from './store'
-import { File } from './proxy'
+import { dirname, basename } from 'path'
+import {
+  block_size,
+  getFileContent,
+  readDir,
+  saveDir,
+  saveFile,
+  saveMimetype,
+  updateFile,
+  renamePath,
+  truncateFile,
+  deleteFile,
+  deleteDir,
+  getByPath,
+  dir_mimetype_id,
+} from './store'
+import { File, proxy } from './proxy'
 let Fuse = require('fuse-native')
 
 let dev = 1 + Math.floor(Math.random() * 100000)
@@ -23,9 +38,9 @@ function stat(args: {
     mode:
       type === 'file'
         ? // 0o644
-          33188
+          0o777
         : // 0o40755
-          16877,
+          0o777,
     nlink: 1,
     uid: 1000,
     gid: 1000,
@@ -46,108 +61,6 @@ function stat(args: {
     isSocket: () => false,
   }
   return data
-  // if (args.type === 'file') {
-  //   let stats = fs.statSync(__filename)
-  //   return Object.assign(stats, data)
-  // }
-  // if (args.type === 'dir') {
-  //   let stats = fs.statSync(__filename)
-  //   return Object.assign(stats, data)
-  // }
-  // throw new Error(`invalid type: ${args.type}`)
-}
-
-export function readdir(
-  path: string,
-  cb: (err: any, filenames: null | string[]) => void,
-): void {
-  let dir = getDir(path)
-  if (!dir) return cb(Fuse.ENOENT, null)
-  return cb(null, readDir(dir))
-}
-
-export function getattr(
-  path: string,
-  cb: (err: any, stat: null | fs.Stats) => void,
-): void {
-  let file = getFile(path)
-  if (file) {
-    return cb(
-      null,
-      stat({
-        id: file.id!,
-        modify_time: file.modify_time,
-        birth_time: file.birth_time,
-        size: file.size,
-        type: 'file',
-      }),
-    )
-  }
-
-  let dir = getDir(path)
-  if (dir) {
-    return cb(
-      null,
-      stat({
-        id: dir.id!,
-        modify_time: dir.modify_time,
-        birth_time: dir.birth_time,
-        size: 4096,
-        type: 'dir',
-      }),
-    )
-  }
-
-  return cb(Fuse.ENOENT, null)
-}
-
-let fd_counter = 0
-
-type FileDescriptor = {
-  file: File
-  pos: number
-  flags: number
-}
-let fd_array: FileDescriptor[] = []
-
-export function open(
-  path: string,
-  flags: number,
-  cb: (err: any, fd: number) => void,
-): void {
-  let file = getFile(path)
-  if (file) {
-    let fd = fd_counter++
-    fd_array.push({ file, pos: 0, flags })
-    return cb(null, fd)
-  }
-  return cb(Fuse.ENOENT, 0)
-}
-
-export function release(
-  path: string,
-  fd: number,
-  cb: (err: any) => void,
-): void {
-  delete fd_array[fd]
-  return cb(null)
-}
-
-export function read(
-  path: string,
-  fd: number,
-  buf: Buffer,
-  len: number,
-  pos: number,
-  cb: (bytesRead: number) => void,
-): void {
-  let file = fd_array[fd]
-  if (!file) return cb(Fuse.EBADF)
-  let content = getFileContent(file.file)
-  let bytes_to_read = Math.min(len, content.byteLength - file.pos)
-  content.copy(buf, pos, file.pos, file.pos + bytes_to_read)
-  file.pos += bytes_to_read
-  return cb(bytes_to_read)
 }
 
 type MountResult = {
@@ -159,50 +72,66 @@ type MountOptions = {
   displayFolder?: string
   force?: boolean
   mkdir?: boolean
+  autoCache?: boolean
 }
 
 export function mount(
   mountpoint: string,
   options: MountOptions = {},
 ): Promise<MountResult> {
-  let handlers = {
-    readdir,
-    getattr,
-    open,
-    release,
-    read,
+  let ops: Record<string, Function> = {
+    readdir(
+      path: string,
+      cb: (err: any, names: string[], stats?: Partial<fs.Stats>[]) => void,
+    ) {
+      let dir = getByPath(path)
+      if (!dir) return cb(Fuse.ENOENT, [])
+      let files = readDir(dir)
+      let names = files.map(file => file.name)
+      let stats = files.map(file =>
+        stat({
+          id: file.id!,
+          modify_time: file.modify_time,
+          birth_time: file.birth_time,
+          size: file.size,
+          type: file.type,
+        }),
+      )
+      return cb(null, names, stats)
+    },
+    getattr(path: string, cb: (err: any, stat: null | fs.Stats) => void) {
+      let file = getByPath(path)
+      if (!file) return cb(Fuse.ENOENT, null)
+      return cb(
+        null,
+        stat({
+          id: file.id!,
+          modify_time: file.modify_time,
+          birth_time: file.birth_time,
+          size: file.size,
+          type: file.mimetype_id == dir_mimetype_id ? 'dir' : 'file',
+        }),
+      )
+    },
   }
   if (options.debug) {
-    handlers.readdir = (path, cb) => {
-      console.log('readdir', { path })
-      readdir(path, cb)
-    }
-    handlers.getattr = (path, cb) => {
-      console.log('getattr', { path })
-      getattr(path, (err, result) => {
-        console.log('getattr', {
-          path,
-          err,
-          result: result?.isFile()
-            ? 'file'
-            : result?.isDirectory()
-            ? 'dir'
-            : 'unknown',
-        })
-        cb(null, result)
-      })
-    }
-    handlers.open = (path, flags, cb) => {
-      console.log('open', { path, flags })
-      open(path, flags, cb)
-    }
-    handlers.release = (path, fd, cb) => {
-      console.log('release', { path, fd })
-      release(path, fd, cb)
-    }
-    handlers.read = (path, fd, buf, len, pos, cb) => {
-      console.log('read', { path, fd, buf, len, pos })
-      read(path, fd, buf, len, pos, cb)
+    for (let key in ops) {
+      let fn = ops[key]
+      ops[key] = function () {
+        console.log('call', key, arguments)
+        let cb = arguments[arguments.length - 1]
+        arguments[arguments.length - 1] = function (err: any, result: any) {
+          if (key == 'getattr' && result) {
+            result = {
+              id: result.ino,
+              type: result.isFile() ? 'file' : 'dir',
+            }
+          }
+          console.log('callback of ' + key, err, result)
+          cb.apply(this, arguments)
+        }
+        fn.apply(this, arguments)
+      }
     }
   }
   let opts = {
@@ -211,8 +140,9 @@ export function mount(
     displayFolder: options.displayFolder ?? 'DedupFS Folder',
     force: options.force ?? false,
     mkdir: options.mkdir ?? false,
+    autoCache: options.autoCache ?? true,
   }
-  let fuse = new Fuse(mountpoint, handlers, opts)
+  let fuse = new Fuse(mountpoint, ops, opts)
   function unmount() {
     fuse.unmount()
   }

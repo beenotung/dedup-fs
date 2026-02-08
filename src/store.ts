@@ -1,8 +1,9 @@
 import { filter, find, pick } from 'better-sqlite3-proxy'
-import { Dir, File, proxy } from './proxy'
+import { File, proxy } from './proxy'
 import { hashChunk } from './hash'
 import { db } from './db'
 import { basename, dirname } from 'path'
+import { Code } from './code'
 
 export let block_size = 256
 
@@ -36,60 +37,76 @@ export function saveDir(path: string): number {
   return parent_id
 }
 
-export function getDir(path: string): Dir | null {
+export function getByPath(path: string): File | null {
   if (!path.startsWith('/')) {
     throw new Error('path must start with /')
   }
   if (path === '/') {
-    return proxy.dir[getRootDir()]
+    return proxy.file[getRootDir()]
   }
   let parts = path.split('/')
   let parent_id: number | null = getRootDir()
   for (let i = 1; i < parts.length; i++) {
     let name = parts[i]
-    parent_id = findDir(parent_id, name)
+    parent_id = findFile(parent_id, name)
     if (!parent_id) return null
+    if (proxy.file[parent_id].mimetype_id != dir_mimetype_id) {
+      let subpath = parts.slice(0, i + 1).join('/')
+      throw new Error(`path ${subpath} is not a directory`)
+    }
   }
-  return proxy.dir[parent_id]
+  return proxy.file[parent_id]
 }
 
-export function getFile(path: string): File | null {
-  let dir_name = dirname(path)
-  let file_name = basename(path)
+let select_by_dir = db.prepare<
+  { parent_id: number },
+  {
+    id: number
+    name: string
+    size: number
+    birth_time: number
+    modify_time: number
+    mimetype_id: number
+  }
+>(/* sql */ `
+select
+  id
+, name
+, size
+, birth_time
+, modify_time
+, mimetype_id
+from file where parent_id = :parent_id
+`)
 
-  let dir = getDir(dir_name)
-  if (!dir) return null
-
-  let file = find(proxy.file, { dir_id: dir.id!, name: file_name })
-  if (!file) return null
-
-  return file
-}
-
-let select_filename_by_dir = db
-  .prepare<{ dir_id: number }, string>(
-    /* sql */ `
-select name from file where dir_id = :dir_id
-`,
-  )
-  .pluck()
-
-export function readDir(dir: Dir): string[] {
-  return select_filename_by_dir.all({ dir_id: dir.id! }) as string[]
+export function readDir(dir: File) {
+  return select_by_dir.all({ parent_id: dir.id! }).map(row => {
+    return {
+      ...row,
+      type:
+        row.mimetype_id == dir_mimetype_id
+          ? ('dir' as const)
+          : ('file' as const),
+    }
+  })
 }
 
 let getRootDir = (): number => {
-  let row = find(proxy.dir, { name: '/' })
+  let row = find(proxy.file, { name: '/' })
   let id
   if (row) {
     id = row.id!
   } else {
     let now = Date.now()
-    id = proxy.dir.push({
+    id = proxy.file.push({
       name: '/',
       parent_id: null,
+      child_count: 0,
       birth_time: now,
       modify_time: now,
+      size: 0,
+      mimetype_id: dir_mimetype_id,
+      parts: null,
     })
   }
   getRootDir = () => id
@@ -99,7 +116,7 @@ let getRootDir = (): number => {
 // parent_id -> name -> id
 let cache_dir: Array<Map<string, number>> = []
 
-function findDir(parent_id: number, name: string): number | null {
+function findFile(parent_id: number, name: string): number | null {
   let dirs = cache_dir[parent_id]
   if (!dirs) {
     dirs = new Map<string, number>()
@@ -108,7 +125,7 @@ function findDir(parent_id: number, name: string): number | null {
 
   let id = dirs.get(name)
   if (!id) {
-    let row = find(proxy.dir, { parent_id, name })
+    let row = find(proxy.file, { parent_id, name })
     if (!row) return null
     id = row.id!
   }
@@ -128,14 +145,24 @@ function saveDirPart(parent_id: number, name: string): number {
     return id
   }
 
-  let row = find(proxy.dir, { parent_id, name })
+  let row = find(proxy.file, { parent_id, name })
   id
   if (row) {
     id = row.id!
   } else {
     let now = Date.now()
-    id = proxy.dir.push({ name, parent_id, birth_time: now, modify_time: now })
-    proxy.dir[parent_id].modify_time = now
+    id = proxy.file.push({
+      name,
+      parent_id,
+      child_count: 0,
+      birth_time: now,
+      modify_time: now,
+      size: 0,
+      mimetype_id: dir_mimetype_id,
+      parts: null,
+    })
+    proxy.file[parent_id].modify_time = now
+    proxy.file[parent_id].child_count++
   }
   dirs.set(name, id)
   return id
@@ -143,7 +170,7 @@ function saveDirPart(parent_id: number, name: string): number {
 
 /** @returns id of the file */
 export function saveFile(args: {
-  dir_id: number
+  dir_id: number | null
   name: string
   content: Buffer
   mimetype_id: number
@@ -157,23 +184,27 @@ export function saveFile(args: {
     parts.push(id)
   }
   let id = proxy.file.push({
-    dir_id: args.dir_id,
+    parent_id: args.dir_id,
     name: args.name,
+    child_count: 0,
     size: content.byteLength,
     birth_time: now,
     modify_time: now,
     mimetype_id: args.mimetype_id,
     parts: parts.join(','),
   })
-  proxy.dir[args.dir_id].modify_time = now
-  return id
+  if (args.dir_id != null) {
+    proxy.file[args.dir_id].modify_time = now
+    proxy.file[args.dir_id].child_count++
+    return id
+  }
 }
 
 export function updateFile(args: { file: File; content: Buffer }) {
   let file = args.file
   let content = args.content
   let now = Date.now()
-  let parts: Array<string | number> = file.parts.split(',')
+  let parts = getParts(file)
   for (let id of parts) {
     proxy.block[+id].count--
   }
@@ -208,7 +239,7 @@ export function saveMimetype(name: string): number {
 
 export function getFileContent(file: File): Buffer {
   if (file.size === 0) return Buffer.alloc(0)
-  let parts: Array<string | number> = file.parts.split(',')
+  let parts = getParts(file)
   let content = Buffer.alloc(file.size)
   let offset = 0
   for (let id of parts) {
@@ -219,9 +250,94 @@ export function getFileContent(file: File): Buffer {
   return content
 }
 
+function getParts(file: File): Array<string | number> {
+  let parts = file.parts
+  if (!parts) return []
+  if (typeof parts === 'number') {
+    return [parts]
+  }
+  return parts.split(',')
+}
+
 export function* getFileContentStream(file: File) {
-  let parts: Array<string | number> = file.parts.split(',')
+  let parts = getParts(file)
   for (let id of parts) {
     yield proxy.block[+id].chunk
   }
 }
+
+export function deleteFile(
+  file: File,
+  options: {
+    // e.g. for rename
+    keep_parts?: boolean
+  } = {},
+): void {
+  let now = Date.now()
+  if (!options.keep_parts) {
+    let parts = getParts(file)
+    for (let id of parts) {
+      proxy.block[+id].count--
+    }
+  }
+  let parent_id = file.parent_id
+  delete proxy.file[file.id!]
+  if (parent_id != null) {
+    proxy.file[parent_id].child_count--
+    proxy.file[parent_id].modify_time = now
+    cache_dir[parent_id].delete(file.name)
+  }
+}
+
+/** @returns true if removed */
+export function deleteDir(dir: File): boolean {
+  if (dir.child_count > 0) {
+    return false
+  }
+  deleteFile(dir)
+  return true
+}
+
+/** @returns 0 ok, -2 ENOENT, -17 EEXIST etc */
+export function renamePath(srcPath: string, destPath: string): number {
+  let srcFile = getByPath(srcPath)
+  if (!srcFile) {
+    return Code.not_exists
+  }
+  let srcDir = srcFile.parent
+
+  let destFile = getByPath(destPath)
+  if (destFile) {
+    return Code.already_exists
+  }
+  let destDir = getByPath(dirname(destPath))
+
+  let now = Date.now()
+  if (srcDir) {
+    srcDir.child_count--
+    srcDir.modify_time = now
+  }
+
+  if (destDir) {
+    destDir.child_count++
+    destDir.modify_time = now
+  }
+  srcFile.parent_id = destDir ? destDir.id! : null
+
+  return 0
+}
+
+export function truncateFile(file: File, size: number): void {
+  let content = getFileContent(file)
+  if (content.byteLength == size) return
+  let newContent: Buffer
+  if (size < content.byteLength) {
+    newContent = content.subarray(0, size)
+  } else {
+    newContent = Buffer.alloc(size)
+    content.copy(newContent, 0)
+  }
+  updateFile({ file, content: newContent })
+}
+
+export let dir_mimetype_id = saveMimetype('inode/directory')

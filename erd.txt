@@ -23,25 +23,17 @@ count integer
 chunk blob
 
 
-dir
----
-id integer PK
-name text
-birth_time integer
-modify_time integer
-parent_id integer NULL FK >0- dir.id
-
-
 file
 ----
 id integer PK
-dir_id integer FK >0- dir.id
+parent_id integer NULL FK >0- file.id
 name text
 size integer
 birth_time integer
 modify_time integer
 mimetype_id integer FK >0- mimetype.id
-parts json
+parts text NULL
+child_count integer
 
 
 mimetype
@@ -59,6 +51,5 @@ name text unique
 # table-bg: #ffffff
 # table-text: #000000
 # block (710, 182)
-# dir (39, 105)
-# file (369, 149)
-# mimetype (107, 309)
+# file (368, 149)
+# mimetype (126, 343)
