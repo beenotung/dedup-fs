@@ -164,12 +164,14 @@ export function mount(
       console.log('SIGUSR1 signal received')
     }
     unmount()
+    process.exit(0)
   })
   process.on('SIGUSR2', () => {
     if (options.debug) {
       console.log('SIGUSR2 signal received')
     }
     unmount()
+    process.exit(0)
   })
 
   // TODO handle restart from ts-node-dev
