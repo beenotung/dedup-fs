@@ -72,7 +72,6 @@ type MountOptions = {
   displayFolder?: string
   force?: boolean
   mkdir?: boolean
-  autoCache?: boolean
 }
 
 export function mount(
@@ -140,7 +139,7 @@ export function mount(
     displayFolder: options.displayFolder ?? 'DedupFS Folder',
     force: options.force ?? false,
     mkdir: options.mkdir ?? false,
-    autoCache: options.autoCache ?? true,
+    autoCache: false,
   }
   let fuse = new Fuse(mountpoint, ops, opts)
   function unmount() {
