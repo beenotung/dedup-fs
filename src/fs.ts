@@ -60,6 +60,8 @@ function stat(args: {
     isFIFO: () => false,
     isSocket: () => false,
   }
+  let stat = fs.statSync(args.type == 'file' ? __filename : __dirname)
+  return Object.assign(stat, data)
   return data
 }
 
@@ -111,6 +113,18 @@ export function mount(
           type: file.mimetype_id == dir_mimetype_id ? 'dir' : 'file',
         }),
       )
+    },
+    access(path: string, mode: number, cb: (err: number) => void) {
+      let file = getByPath(path)
+      return cb(file ? 0 : Fuse.ENOENT)
+    },
+    // Return ENOSYS so kernel has no dir handle and uses READDIR(path) not READDIRPLUS
+    opendir(
+      path: string,
+      flags: number,
+      cb: (err: number, fd?: number) => void,
+    ) {
+      return cb(Fuse.ENOSYS, 0)
     },
   }
   if (options.debug) {
