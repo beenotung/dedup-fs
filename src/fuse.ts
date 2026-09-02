@@ -140,4 +140,5 @@ export let ErrorCodes = {
   EEXIST: Fuse.EEXIST,
   ENOTEMPTY: Fuse.ENOTEMPTY,
   EISDIR: Fuse.EISDIR,
+  EINVAL: Fuse.EINVAL,
 }

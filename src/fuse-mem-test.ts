@@ -19,7 +19,6 @@ async function main() {
   }
   type DirEntry = BaseEntry & {
     type: 'dir'
-    children: string[]
   }
   type FileEntry = BaseEntry & {
     type: 'file'
@@ -35,7 +34,6 @@ async function main() {
       mtime: now,
       ctime: now,
       birthtime: now,
-      children: [],
     })
   }
   let fd_map = new Map<number, Entry>()
@@ -70,16 +68,13 @@ async function main() {
       birthtime: entry.birthtime,
     }
   }
-  function get_parent(path: string, cb: (err: any, parent: DirEntry) => void) {
-    let parent_path = dirname(path)
-    let parent = file_map.get(parent_path)
-    if (!parent) {
-      return cb(ErrorCodes.ENOENT, null as any)
+  function has_children(path: string): boolean {
+    for (let [p, entry] of file_map) {
+      if (dirname(p) === path) {
+        return true
+      }
     }
-    if (parent.type !== 'dir') {
-      return cb(ErrorCodes.ENOTDIR, null as any)
-    }
-    cb(null, parent)
+    return false
   }
   function truncate_entry(entry: FileEntry, length: number) {
     if (entry.content.length === length) {
@@ -114,15 +109,8 @@ async function main() {
           mtime: now,
           ctime: now,
           birthtime: now,
-          children: [],
         })
-        get_parent(path, (err, parent) => {
-          if (err) {
-            return cb(err)
-          }
-          parent.children.push(basename(path))
-          cb(0)
-        })
+        cb(0)
       },
       rmdir: (path, cb) => {
         console.log('rmdir:', { path })
@@ -133,18 +121,12 @@ async function main() {
         if (entry.type !== 'dir') {
           return cb(ErrorCodes.ENOTDIR)
         }
-        if (entry.children.length > 0) {
+        // FIXME do i really need to implement this? or the kernel will handle that?
+        if (has_children(path)) {
           return cb(ErrorCodes.ENOTEMPTY)
         }
-        get_parent(path, (err, parent) => {
-          if (err) {
-            return cb(err)
-          }
-          let name = basename(path)
-          remove_in_array(parent.children, name)
-          file_map.delete(path)
-          cb(0)
-        })
+        file_map.delete(path)
+        cb(0)
       },
       create: (path, flags, cb) => {
         console.log('create:', { path, flags })
@@ -162,26 +144,29 @@ async function main() {
           birthtime: now,
           content: Buffer.alloc(0),
         }
-        get_parent(path, (err, parent) => {
-          if (err) {
-            return cb(err)
-          }
-          parent.children.push(basename(path))
-          file_map.set(path, file_entry)
-          fd_map.set(fd, file_entry)
-          cb(0, fd)
-        })
+        file_map.set(path, file_entry)
+        fd_map.set(fd, file_entry)
+        cb(0, fd)
       },
       readdir: (path, cb) => {
         console.log('readdir:', { path })
         let entry = file_map.get(path)
         if (!entry) {
+          // FIXME do i really need to implement this? or the kernel will handle that?
           return cb(ErrorCodes.ENOENT, null as any)
         }
         if (entry.type !== 'dir') {
+          // FIXME do i really need to implement this? or the kernel will handle that?
           return cb(ErrorCodes.ENOTDIR, null as any)
         }
-        cb(null, entry.children)
+        let children = []
+        for (let p of file_map.keys()) {
+          if (p === path) continue
+          if (dirname(p) === path) {
+            children.push(basename(p))
+          }
+        }
+        cb(null, children)
       },
       fstat: (path, fd, cb) => {
         console.log('fstat:', { path, fd })
@@ -284,49 +269,50 @@ async function main() {
       },
       rename: (src, dest, cb) => {
         console.log('rename:', { src, dest })
-        get_parent(src, (err, src_parent) => {
-          if (err) {
-            return cb(err)
+        let src_entry = file_map.get(src)
+        if (!src_entry) {
+          return cb(ErrorCodes.ENOENT)
+        }
+        let dest_entry = file_map.get(dest)
+        if (dest_entry) {
+          if (src_entry.type === 'file' && dest_entry.type === 'dir') {
+            return cb(ErrorCodes.EISDIR)
           }
-          get_parent(dest, (err, dest_parent) => {
-            if (err) {
-              return cb(err)
+          if (src_entry.type === 'dir' && dest_entry.type === 'file') {
+            return cb(ErrorCodes.ENOTDIR)
+          }
+          if (
+            src_entry.type === 'dir' &&
+            dest_entry.type === 'dir' &&
+            has_children(dest)
+          ) {
+            return cb(ErrorCodes.ENOTEMPTY)
+          }
+          file_map.delete(dest)
+        }
+        // prevent renaming a dir into its own descendant (e.g. /a -> /a/b/c)
+        if (src_entry.type === 'dir' && dest.startsWith(src + '/')) {
+          return cb(ErrorCodes.EINVAL)
+        }
+        let entries: Array<[string, Entry]> = []
+        if (src_entry.type === 'dir') {
+          for (let [p, entry] of file_map) {
+            if (p.startsWith(src + '/')) {
+              entries.push([p, entry])
             }
-            let src_entry = file_map.get(src)
-            if (!src_entry) {
-              return cb(ErrorCodes.ENOENT)
-            }
-            let src_name = basename(src)
-            let dest_name = basename(dest)
-            let dest_entry = file_map.get(dest)
-            if (!dest_entry) {
-              // move from src_parent to dest_parent
-              remove_in_array(src_parent.children, src_name)
-              dest_parent.children.push(dest_name)
-              file_map.delete(src)
-              file_map.set(dest, src_entry)
-              return cb(0)
-            }
-            if (dest_entry.type === 'dir') {
-              // move src_parent into dest directory
-              if (!dest_entry.children.includes(src_name)) {
-                dest_entry.children.push(src_name)
-              }
-              remove_in_array(src_parent.children, src_name)
-              file_map.delete(src)
-              file_map.set(dest + '/' + src_name, src_entry)
-              return cb(0)
-            }
-            // overwrite dest_entry with src_entry, and remove src_entry
-            remove_in_array(src_parent.children, src_name)
-            file_map.delete(src)
-            file_map.set(dest, src_entry)
-            cb(0)
-          })
-        })
+          }
+        }
+        file_map.delete(src)
+        file_map.set(dest, src_entry)
+        for (let [p, entry] of entries) {
+          file_map.delete(p)
+          file_map.set(dest + p.slice(src.length), entry)
+        }
+        cb(0)
       },
       statfs: (path, cb) => {
         console.log('statfs:', { path })
+        // TODO implement it somehow
         cb(0, {
           bsize: 4096,
           frsize: 4096,
@@ -347,18 +333,11 @@ async function main() {
         if (!entry) {
           return cb(ErrorCodes.ENOENT)
         }
-        if (entry.type !== 'file') {
+        if (entry.type === 'dir') {
           return cb(ErrorCodes.EISDIR)
         }
-        get_parent(path, (err, parent) => {
-          if (err) {
-            return cb(err)
-          }
-          let name = basename(path)
-          parent.children = parent.children.filter(c => c !== name)
-          file_map.delete(path)
-          cb(0)
-        })
+        file_map.delete(path)
+        cb(0)
       },
     },
   })
@@ -407,6 +386,36 @@ async function main() {
       statfs_result.blocks,
       statfs_result.bfree,
     )
+
+    console.log('9. rename dir with children...')
+    let dir_1 = fuse.mountpoint + '/dir_1'
+    let dir_2 = fuse.mountpoint + '/dir_2'
+    await mkdir(dir_1 + '/nested', { recursive: true })
+    await writeFile(dir_1 + '/nested/child.txt', 'child content', 'utf-8')
+    await rename(dir_1, dir_2)
+    let child_content = await readFile(dir_2 + '/nested/child.txt', 'utf-8')
+    console.log('child content:', JSON.stringify(child_content))
+    let dir_files = await readdir(dir_2 + '/nested')
+    console.log('dir_files:', dir_files)
+    let root_files = await readdir(fuse.mountpoint)
+    console.log('root_files:', root_files)
+    try {
+      await readFile(dir_1 + '/nested/child.txt', 'utf-8')
+      console.log('ERROR: old path still readable')
+    } catch (e: any) {
+      console.log('old path correctly gone:', e.code)
+    }
+
+    console.log('10. rename dir into own descendant (EINVAL)...')
+    try {
+      await rename(dir_2, dir_2 + '/nested/inside')
+      console.log('ERROR: self-descendant rename should fail')
+    } catch (e: any) {
+      console.log('self-descendant rename correctly rejected:', e.code)
+    }
+    // verify dir_2 still intact after the rejected rename
+    let intact = await readdir(dir_2 + '/nested')
+    console.log('dir_files after rejected rename:', intact)
   } finally {
     console.log('unmounting...')
     await fuse.unmount()
@@ -420,11 +429,4 @@ main().catch(error => {
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function remove_in_array(list: string[], name: string) {
-  let index = list.indexOf(name)
-  if (index !== -1) {
-    list.splice(index, 1)
-  }
 }
