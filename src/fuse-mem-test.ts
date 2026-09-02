@@ -311,16 +311,24 @@ async function main() {
       },
       statfs: (path, cb) => {
         console.log('statfs:', { path })
-        // TODO implement it somehow
+        // reflect the in-memory usage; when store-backed, report real free space
+        let total_bytes = 0
+        for (let entry of file_map.values()) {
+          if (entry.type === 'file') {
+            total_bytes += entry.content.length
+          }
+        }
+        let blocks = Math.ceil(total_bytes / 4096)
+        let total_blocks = 1024 * 1024
         cb(0, {
           bsize: 4096,
           frsize: 4096,
-          blocks: 1000000,
-          bfree: 990000,
-          bavail: 990000,
-          files: 1000000,
-          ffree: 999000,
-          favail: 999000,
+          blocks: total_blocks,
+          bfree: total_blocks - Math.ceil(total_bytes / 4096),
+          bavail: total_blocks - Math.ceil(total_bytes / 4096),
+          files: file_map.size,
+          ffree: total_blocks - file_map.size,
+          favail: total_blocks - file_map.size,
           fsid: 1,
           flag: 0,
           namemax: 255,
