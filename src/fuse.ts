@@ -3,6 +3,34 @@ export { Stats } from 'fs'
 
 let Fuse = require('fuse-native')
 
+/**
+ * shape required by fuse statfs, mirrors statvfs(3)
+ * (fuse-native reads these fields in getStatfsArray)
+ */
+export type FuseStatfs = {
+  /** file system type id (not read by fuse-native) */
+  type?: number
+  /** optimal transfer block size */
+  bsize: number
+  /** fundamental block size (usually = bsize) */
+  frsize: number
+  /** total data blocks */
+  blocks: number
+  /** free data blocks (bytes capacity) */
+  bfree: number
+  /** free blocks for unprivileged users */
+  bavail: number
+  /** total file nodes */
+  files: number
+  /** free file nodes (file-slot capacity) */
+  ffree: number
+  /** free file nodes for unprivileged users */
+  favail: number
+  fsid: number
+  flag: number
+  namemax: number
+}
+
 export type FuseOperations = {
   readdir(path: string, cb: (err: any, names: string[]) => void): void
   getattr(path: string, cb: (err: any, stat: Stats) => void): void
@@ -21,7 +49,12 @@ export type FuseOperations = {
     buffer: Buffer,
     length: number,
     position: number,
-    cb: (bytesRead: number, buffer?: ArrayBufferLike) => void,
+    cb: {
+      /** success */
+      (bytesRead: number, buffer: ArrayBufferLike): void
+      /** fail */
+      (errno: number): void
+    },
   ): void
   write(
     path: string,
@@ -29,7 +62,12 @@ export type FuseOperations = {
     buffer: Buffer,
     length: number,
     position: number,
-    cb: (bytesWritten: number, buffer?: ArrayBufferLike) => void,
+    cb: {
+      /** success */
+      (bytesWritten: number, buffer: ArrayBufferLike): void
+      /** fail */
+      (errno: number): void
+    },
   ): void
   fsync(
     path: string,
@@ -51,22 +89,7 @@ export type FuseOperations = {
   ): void
   truncate(path: string, length: number, cb: (err: any) => void): void
   rename(src: string, dest: string, cb: (err: any) => void): void
-  statfs(
-    path: string,
-    cb: (err: any, statfs: {
-      bsize: number
-      frsize: number
-      blocks: number
-      bfree: number
-      bavail: number
-      files: number
-      ffree: number
-      favail: number
-      fsid: number
-      flag: number
-      namemax: number
-    }) => void,
-  ): void
+  statfs(path: string, cb: (err: any, statfs: FuseStatfs) => void): void
 }
 
 export function createFuse(args: {
@@ -141,4 +164,5 @@ export let ErrorCodes = {
   ENOTEMPTY: Fuse.ENOTEMPTY,
   EISDIR: Fuse.EISDIR,
   EINVAL: Fuse.EINVAL,
+  ENOSPC: Fuse.ENOSPC,
 }

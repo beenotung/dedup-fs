@@ -11,6 +11,10 @@ import { basename, dirname } from 'path'
 import { createFuse, ErrorCodes, Stats } from './fuse'
 
 async function main() {
+  // pretend capacity of the in-memory fs; writes beyond it fail with ENOSPC
+  let bsize = 4096
+  let max_capacity = 4 * 1024 * 1024 * 1024 // 4 GiB
+  let total_inodes = 1024 * 1024
   type BaseEntry = {
     atime: Date
     mtime: Date
@@ -89,6 +93,15 @@ async function main() {
       Buffer.alloc(length - entry.content.length),
     ])
   }
+  function used_bytes(): number {
+    let total = 0
+    for (let entry of file_map.values()) {
+      if (entry.type === 'file') {
+        total += entry.content.length
+      }
+    }
+    return total
+  }
   let mountpoint =
     '/tmp/fuse-test/' + Math.random().toString(36).substring(2, 8)
   console.log('mountpoint:', mountpoint)
@@ -101,6 +114,9 @@ async function main() {
         let entry = file_map.get(path)
         if (entry) {
           return cb(ErrorCodes.EEXIST)
+        }
+        if (file_map.size >= total_inodes) {
+          return cb(ErrorCodes.ENOSPC)
         }
         let now = new Date()
         file_map.set(path, {
@@ -133,6 +149,9 @@ async function main() {
         let entry = file_map.get(path)
         if (entry) {
           return cb(ErrorCodes.EEXIST)
+        }
+        if (file_map.size >= total_inodes) {
+          return cb(ErrorCodes.ENOSPC)
         }
         let fd = fd_map.size + 1
         let now = new Date()
@@ -231,6 +250,11 @@ async function main() {
         if (entry.type !== 'file') {
           return cb(ErrorCodes.ENOTDIR)
         }
+        let new_bytes =
+          used_bytes() - entry.content.length + position + buffer.length
+        if (new_bytes > max_capacity) {
+          return cb(ErrorCodes.ENOSPC)
+        }
         entry.content = Buffer.concat([entry.content, buffer])
         cb(buffer.length, buffer.buffer)
       },
@@ -312,23 +336,17 @@ async function main() {
       statfs: (path, cb) => {
         console.log('statfs:', { path })
         // reflect the in-memory usage; when store-backed, report real free space
-        let total_bytes = 0
-        for (let entry of file_map.values()) {
-          if (entry.type === 'file') {
-            total_bytes += entry.content.length
-          }
-        }
-        let blocks = Math.ceil(total_bytes / 4096)
-        let total_blocks = 1024 * 1024
+        let total_blocks = Math.floor(max_capacity / bsize)
+        let used_blocks = Math.ceil(used_bytes() / bsize)
         cb(0, {
-          bsize: 4096,
-          frsize: 4096,
+          bsize,
+          frsize: bsize,
           blocks: total_blocks,
-          bfree: total_blocks - Math.ceil(total_bytes / 4096),
-          bavail: total_blocks - Math.ceil(total_bytes / 4096),
-          files: file_map.size,
-          ffree: total_blocks - file_map.size,
-          favail: total_blocks - file_map.size,
+          bfree: total_blocks - used_blocks, // free data blocks (bytes capacity)
+          bavail: total_blocks - used_blocks,
+          files: total_inodes,
+          ffree: total_inodes - file_map.size, // free file slots (inode capacity)
+          favail: total_inodes - file_map.size,
           fsid: 1,
           flag: 0,
           namemax: 255,
