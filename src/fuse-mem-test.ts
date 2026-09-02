@@ -121,7 +121,7 @@ async function main() {
         if (entry.type !== 'dir') {
           return cb(ErrorCodes.ENOTDIR)
         }
-        // FIXME do i really need to implement this? or the kernel will handle that?
+        // the kernel does not pre-check emptiness; rmdir must return ENOTEMPTY itself
         if (has_children(path)) {
           return cb(ErrorCodes.ENOTEMPTY)
         }
@@ -152,11 +152,10 @@ async function main() {
         console.log('readdir:', { path })
         let entry = file_map.get(path)
         if (!entry) {
-          // FIXME do i really need to implement this? or the kernel will handle that?
+          // the kernel may call readdir on any path without prior getattr; the fs must validate
           return cb(ErrorCodes.ENOENT, null as any)
         }
         if (entry.type !== 'dir') {
-          // FIXME do i really need to implement this? or the kernel will handle that?
           return cb(ErrorCodes.ENOTDIR, null as any)
         }
         let children = []
